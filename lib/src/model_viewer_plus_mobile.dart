@@ -5,24 +5,22 @@ import 'dart:convert' show utf8;
 import 'dart:io'
     show File, HttpRequest, HttpServer, HttpStatus, InternetAddress, Platform;
 import 'dart:typed_data' show Uint8List;
+
+import 'package:android_intent_plus/android_intent.dart' as android_content;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:path/path.dart' as p;
-
-import 'package:android_intent_plus/flag.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:android_intent_plus/android_intent.dart' as android_content;
+import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import 'html_builder.dart';
-
 import 'model_viewer_plus.dart';
 
 class ModelViewerState extends State<ModelViewer> {
   final Completer<WebViewController> _controller =
-      Completer<WebViewController>();
+  Completer<WebViewController>();
 
   HttpServer? _proxy;
   late String _proxyURL;
@@ -64,7 +62,7 @@ class ModelViewerState extends State<ModelViewer> {
         initialMediaPlaybackPolicy: AutoMediaPlaybackPolicy.always_allow,
         gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
           Factory<OneSequenceGestureRecognizer>(
-            () => EagerGestureRecognizer(),
+                () => EagerGestureRecognizer(),
           ),
         },
         onWebViewCreated: (final WebViewController webViewController) async {
@@ -111,7 +109,8 @@ class ModelViewerState extends State<ModelViewer> {
               fileURL = p.joinAll([_proxyURL, 'model']);
             }
             final intent = android_content.AndroidIntent(
-              action: "android.intent.action.VIEW", // Intent.ACTION_VIEW
+              action: "android.intent.action.VIEW",
+              // Intent.ACTION_VIEW
               // See https://developers.google.com/ar/develop/scene-viewer#3d-or-ar
               // data should be something like "https://arvr.google.com/scene-viewer/1.0?file=https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/Avocado/glTF/Avocado.gltf"
               data: Uri(
@@ -129,7 +128,7 @@ class ModelViewerState extends State<ModelViewer> {
               package: "com.google.android.googlequicksearchbox",
               arguments: <String, dynamic>{
                 'browser_fallback_url':
-                    'market://details?id=com.google.android.googlequicksearchbox'
+                'market://details?id=com.google.android.googlequicksearchbox'
               },
             );
             await intent.launch().onError((error, stackTrace) {
@@ -159,7 +158,7 @@ class ModelViewerState extends State<ModelViewer> {
       htmlTemplate: htmlTemplate,
       src: '/model',
       alt: widget.alt,
-      poster: widget.poster,
+      poster: '/poster',
       seamlessPoster: widget.seamlessPoster,
       loading: widget.loading,
       reveal: widget.reveal,
@@ -225,7 +224,8 @@ class ModelViewerState extends State<ModelViewer> {
   }
 
   Future<void> _initProxy() async {
-    final url = Uri.parse(widget.src);
+    final modelSrc = Uri.parse(widget.src);
+    final posterSrc = widget.poster != null ? Uri.parse(widget.poster!) : null;
     _proxy = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
 
     setState(() {
@@ -267,13 +267,31 @@ class ModelViewerState extends State<ModelViewer> {
           break;
 
         case '/model':
-          if (url.isAbsolute && !url.isScheme("file")) {
+          if (modelSrc.isAbsolute && !modelSrc.isScheme("file")) {
             // debugPrint(url.toString());
-            await response.redirect(url); // TODO: proxy the resource
+            await response.redirect(modelSrc); // TODO: proxy the resource
           } else {
-            final data = await (url.isScheme("file")
-                ? _readFile(url.path)
-                : _readAsset(url.path));
+            final data = await (modelSrc.isScheme("file")
+                ? _readFile(modelSrc.path)
+                : _readAsset(modelSrc.path));
+            response
+              ..statusCode = HttpStatus.ok
+              ..headers.add("Content-Type", "application/octet-stream")
+              ..headers.add("Content-Length", data.lengthInBytes.toString())
+              ..headers.add("Access-Control-Allow-Origin", "*")
+              ..add(data);
+            await response.close();
+          }
+          break;
+
+        case '/poster':
+          posterSrc!;
+          if (posterSrc.isAbsolute && !posterSrc.isScheme("file")) {
+            await response.redirect(posterSrc);
+          } else {
+            final data = await (posterSrc.isScheme("file")
+                ? _readFile(posterSrc.path)
+                : _readAsset(posterSrc.path));
             response
               ..statusCode = HttpStatus.ok
               ..headers.add("Content-Type", "application/octet-stream")
@@ -300,10 +318,10 @@ class ModelViewerState extends State<ModelViewer> {
             await response.redirect(request.uri);
           } else if (request.uri.hasAbsolutePath) {
             // Some gltf models need other resources from the origin
-            var pathSegments = [...url.pathSegments];
+            var pathSegments = [...modelSrc.pathSegments];
             pathSegments.removeLast();
             var tryDestination = p.joinAll([
-              url.origin,
+              modelSrc.origin,
               ...pathSegments,
               request.uri.path.replaceFirst('/', '')
             ]);
